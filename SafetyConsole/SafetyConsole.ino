@@ -32,7 +32,9 @@
 #define MESNEWSAFETIME 4
 #define MESNEWROOM 5
 #define MESHAZMAT 6
-#define SYNCTIME 84600
+#define SYNCTIME 86400
+#define SECONDSINONEDAY 86400
+#define SECRADSTABLEBEFOREBTSEND 2
 
 //D10:pin of card reader SDA. D9:pin of card reader RST
 RFID rfid(10, 9);
@@ -56,6 +58,8 @@ bool techOverstayWarning = false;
 int radLevel;
 float radMean;
 long secToRadLim;
+long sendRadAtTime;
+bool radRecentlyChanged = false;
 
 //technichian variabels
 float techAccRad = TECHSTARTRAD;
@@ -93,6 +97,7 @@ void setup() {
   
   //Init LCD
   lcd.begin(16,2);
+ 
   lcd.print("Please wait for");
   lcd.setCursor(3,1);
   lcd.print("time sync");
@@ -137,8 +142,12 @@ void rfidCheck(){
               updateSafetyLimTime = true;
               sendMessage[MESIN] = true;
               mesSent[MESIN] = false;  
+              sendMessage[MESNEWROOM] = true;
+              mesSent[MESNEWROOM] = false;
+              sendMessage[MESHAZMAT] = true;
+              mesSent[MESHAZMAT] = false;
               sendMessage[MESNEWSAFETIME] = true;
-              mesSent[MESNEWSAFETIME] = false;
+              mesSent[MESNEWSAFETIME] = false; 
           }
           else{
               clockOutTime = seconds;
@@ -172,10 +181,16 @@ void adcRead(){
     radMeanTrunk = 1;
   }
   if(radMeanTrunk != radLevel && technichIn){
+      radRecentlyChanged = true;
+      sendRadAtTime = seconds;
+      updateSafetyLimTime = true; 
+  } 
+  if(radRecentlyChanged && sendRadAtTime < ( (seconds-SECRADSTABLEBEFOREBTSEND) % SECONDSINONEDAY) ){
+      radRecentlyChanged = false;
       updateSafetyLimTime = true;
       sendMessage[MESNEWSAFETIME] = true;
       mesSent[MESNEWSAFETIME] = false;   
-  } 
+  }
   radLevel = radMeanTrunk;
   if(technichIn){
     if(analogRead(BREAKROOMPIN) < PUSHBUTTONTHREASHOLD && techCurrRoom != BREAKROOM){
@@ -257,6 +272,14 @@ void sendBTMes(){
   }
   if(sendMessage[MESNEWSAFETIME] && !mesSent[MESNEWSAFETIME] ){
     String message = "L ";
+    if(radLevel < 10){
+      message += "00";
+    }
+    else if(radLevel < 100){
+      message += "0";
+    }
+    message += radLevel;
+    message += " ";
     message += secToRadLim;
     bt.println(message);
     mesSent[MESNEWSAFETIME] = true;
