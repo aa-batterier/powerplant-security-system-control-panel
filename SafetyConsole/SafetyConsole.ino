@@ -41,7 +41,8 @@ SoftwareSerial bt(2,3);
 
 unsigned char str[MAX_LEN]; //MAX_LEN is 16: size of the array
 unsigned char cardID[4] = {105,159,199,86};
-
+bool unauthorized = false;
+long unauthorizedTime = 0; //Is long to be able to store the time and use it to show a message for a limited time.
 bool technichIn;
 
 //clock var
@@ -129,26 +130,29 @@ void rfidCheck(){
           break;
       }      
       if(equalCounter == NUMINIDENTIFICATION){ //the cardID is ok
-        technichIn = !technichIn;
-        if(technichIn){
-          clockInTime = seconds;
-          updateSafetyLimTime = true;
-          sendMessage[MESIN] = true;
-          mesSent[MESIN] = false;  
-          sendMessage[MESNEWSAFETIME] = true;
-          mesSent[MESNEWSAFETIME] = false;
-        }
-        else{
-          clockOutTime = seconds;
-          techOverstayWarning = false;
-          sendMessage[MESOUT] = true;
-          mesSent[MESOUT] = false;              
-        }
-        updateLCD = true;
+          technichIn = !technichIn;
+          unauthorized = false;
+          if(technichIn){
+              clockInTime = seconds;
+              updateSafetyLimTime = true;
+              sendMessage[MESIN] = true;
+              mesSent[MESIN] = false;  
+              sendMessage[MESNEWSAFETIME] = true;
+              mesSent[MESNEWSAFETIME] = false;
+          }
+          else{
+              clockOutTime = seconds;
+              techOverstayWarning = false;
+              sendMessage[MESOUT] = true;
+              mesSent[MESOUT] = false;              
+          }
+          updateLCD = true;
       }
-      //else
-       // Serial.println("Not authorized");
-      //Serial.println("");
+      else{
+          unauthorized = true;
+          unauthorizedTime = seconds;
+          updateLCD = true;
+      }
     }
     //card selection (lock card to prevent redundant read, removing the line will make the sketch read cards continually)
     rfid.selectTag(str);
@@ -378,79 +382,93 @@ void updateTechAccRad(){
 }
 
 void updateDisplay(){ 
-  if (updateLCD){
-    lcd.setCursor(0,0);
-    if(technichIn){
-        if( ((clockInTime+3)%84600) > seconds ){
-          lcd.clear();
-          lcd.print("Welcome T1");
-        }
-        else{
-          lcd.print("T1 in P=");
-          if(gotHazmatSuit){
-            lcd.print("Hz ");
-          }
-          else{
-            lcd.print("No ");
-          }
-          if(techCurrRoom == BREAKROOM){
-            lcd.print("BreRo");
-          }
-          else if(techCurrRoom == CONTROLROOM){
-            lcd.print("ConRo");
-          }
-          else{
-            lcd.print("ReaRo");
-          }
-          lcd.setCursor(0,1);
-          if(secToRadLim < 0){
-            if(secToRadLim%3){
-              lcd.print("T1 must out");
+    if (updateLCD){
+        lcd.setCursor(0,0);
+        if(technichIn){
+            //recent clock in.
+            if( ((clockInTime+3)%84600) > seconds ){
+                lcd.clear();
+                lcd.print("Welcome T1");
             }
             else{
-              lcd.print("WARNING!!! ");
-            }            
-          }
-          else{
-            lcd.print("L=");
-            int HH = secToRadLim/3600;
-            int MM = (secToRadLim%3600)/60;
-            lcd.print((secToRadLim/3600)/10);//Hour Tens
-            lcd.print((secToRadLim/3600)%10);//
-            lcd.print(":");
-            lcd.print((secToRadLim%3600)/600);//Min tens
-            lcd.print(((secToRadLim%3600)/60)%10);//Min tens
-            lcd.print(":");
-            lcd.print((secToRadLim%60)/10);
-            lcd.print(secToRadLim%10);
-          }
-          lcd.print(" ");
+                lcd.print("T1 in P=");
+                if(gotHazmatSuit){
+                    lcd.print("Hz ");
+                }
+                else{
+                    lcd.print("No ");
+                }
+                if(techCurrRoom == BREAKROOM){
+                    lcd.print("BreRo");
+                }
+                else if(techCurrRoom == CONTROLROOM){
+                    lcd.print("ConRo");
+                }
+                else{
+                    lcd.print("ReaRo");
+                }
+                lcd.setCursor(0,1);
+                if(secToRadLim < 0){
+                    if(secToRadLim%3){
+                        lcd.print("T1 must out");
+                    }
+                    else{
+                        lcd.print("WARNING!!! ");
+                    }            
+                }
+                else{
+                    lcd.print("L=");
+                    int HH = secToRadLim/3600;
+                    int MM = (secToRadLim%3600)/60;
+                    lcd.print((secToRadLim/3600)/10);//Hour Tens
+                    lcd.print((secToRadLim/3600)%10);//
+                    lcd.print(":");
+                    lcd.print((secToRadLim%3600)/600);//Min tens
+                    lcd.print(((secToRadLim%3600)/60)%10);//Min tens
+                    lcd.print(":");
+                    lcd.print((secToRadLim%60)/10);
+                    lcd.print(secToRadLim%10);
+                }
+                lcd.print(" ");
+            }
         }
+        //Technician is out
+        else{ 
+            //recent clock out
+            if( ((clockOutTime+3)%84600) >seconds){
+                lcd.clear();
+                lcd.print("Good bye T1");
+            }
+            else{
+                lcd.print("T1 out              ");
+                lcd.setCursor(0,1);
+                lcd.print("           ");
+            }
+        }
+
+        if(unauthorized){
+            if( ((unauthorizedTime + 4)%84600) > seconds){
+                lcd.setCursor(0,0);
+                lcd.print("Unauthorized    ");
+                lcd.setCursor(0,1);
+                lcd.print("card          ");
+            } 
+            else{
+                unauthorized = false;
+            }
+        }
+        
+        lcd.setCursor(11,1);
+        lcd.print("R=");
+        lcd.print(radLevel);
+        lcd.print("  ");
     }
-    else
-    { 
-      if( ((clockOutTime+3)%84600) >seconds){
-        lcd.clear();
-        lcd.print("Good bye T1");
-      }
-      else
-      {
-        lcd.print("T1 out              ");
-        lcd.setCursor(0,1);
-        lcd.print("           ");
-      }
-    }
-    lcd.setCursor(11,1);
-    lcd.print("R=");
-    lcd.print(radLevel);
-    lcd.print("  ");
-    
+     
     if(techOverstayWarning && seconds%2){
-      digitalWrite(LEDPINWARNING,HIGH);
+        digitalWrite(LEDPINWARNING,HIGH);
     }
     else{
-      digitalWrite(LEDPINWARNING, LOW);
+        digitalWrite(LEDPINWARNING, LOW);
     }
-  }
-  updateLCD = false;
+    updateLCD = false;
 }
