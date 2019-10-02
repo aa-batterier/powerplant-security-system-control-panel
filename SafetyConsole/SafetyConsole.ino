@@ -24,7 +24,7 @@
 #define HAZMATSUITCOF 5
 #define NORMALCLOTHESCOF 1
 #define BTCOMTIMESYNC 'T'
-#define TECHSTARTRAD 495000
+#define TECHSTARTRAD 0
 #define MESWAR 0
 #define MESIN 1
 #define MESOUT 2
@@ -238,11 +238,12 @@ void adcRead(){
 }
 void sendBTMes(){
   if (sendMessage[MESWAR] && !mesSent[MESWAR]){
-    bt.println("W");
+    bt.println("W ");
     mesSent[MESWAR] = true;    
   }
   if (sendMessage[MESIN] && !mesSent[MESIN]){
     String message = "I " + createTimeMess(clockInTime);
+    message += " ";
     bt.println(message);       
     mesSent[MESIN] = true;
   }
@@ -250,37 +251,35 @@ void sendBTMes(){
     String message = "O " + createTimeMess(clockOutTime);
     message += " ";
     message += long(techAccRad);
+    message += " ";
     bt.println(message);
     mesSent[MESOUT] = true;
     techAccRad = TECHSTARTRAD;
   }  
   if(sendMessage[MESGETTIME] && !mesSent[MESGETTIME]){
-    bt.println("T");
+    bt.println("T ");
     mesSent[MESGETTIME] = true;
   }
   if(sendMessage[MESNEWROOM] && !mesSent[MESNEWROOM]){
     String message = "R ";
     message += techCurrRoom;
+    message += " ";
     bt.println(message);
     mesSent[MESNEWROOM] = true;
   }
   if(sendMessage[MESHAZMAT] && !mesSent[MESHAZMAT]){
     String message = "P ";
     message += gotHazmatSuit;
+    message += " ";
     bt.println(message);
     mesSent[MESHAZMAT] = true;
   }
   if(sendMessage[MESNEWSAFETIME] && !mesSent[MESNEWSAFETIME] ){
     String message = "L ";
-    if(radLevel < 10){
-      message += "00";
-    }
-    else if(radLevel < 100){
-      message += "0";
-    }
     message += radLevel;
     message += " ";
     message += secToRadLim;
+    message += " ";
     bt.println(message);
     mesSent[MESNEWSAFETIME] = true;
   }
