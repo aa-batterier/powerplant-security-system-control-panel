@@ -20,7 +20,7 @@
 #define REACTORROOM 3
 #define RADCONTROLROOM 0.5
 #define RADREACTORROOM 1.6
-#define RADSAFETYLIM 500000
+#define RADSAFETYLIM 5000 //Should be 500k
 #define HAZMATSUITCOF 5
 #define NORMALCLOTHESCOF 1
 #define BTCOMTIMESYNC 'T'
@@ -34,7 +34,7 @@
 #define MESHAZMAT 6
 #define SYNCTIME 86400
 #define SECONDSINONEDAY 86400
-#define SECRADSTABLEBEFOREBTSEND 2
+#define SECRADSTABLEBEFOREBTSEND 0 
 
 //D10:pin of card reader SDA. D9:pin of card reader RST
 RFID rfid(10, 9);
@@ -63,6 +63,7 @@ bool radRecentlyChanged = false;
 
 //technichian variabels
 float techAccRad = TECHSTARTRAD;
+long techAccRadAtClockOut;
 long clockInTime, clockOutTime;
 int techCurrRoom = BREAKROOM;
 int estSecBefLim;
@@ -70,6 +71,8 @@ bool gotHazmatSuit = false;
 
 //BT
 String btMessage="";
+bool sendNow = false;
+long mesSentAt;
 bool sendMessage[] = {false, false, false, false,false,false,false};
 bool mesSent[] = {false, false, false, false,false, false, false};
 
@@ -104,6 +107,7 @@ void setup() {
   FlexiTimer2::set(1000, timerInt);
   FlexiTimer2::start();
   while(!isSync){ //Sync time with app before start
+    sendNow = true;
     sendMessage[MESGETTIME] = true;
     mesSent[MESGETTIME] = false;
     sendBTMes();
@@ -138,6 +142,7 @@ void rfidCheck(){
           technichIn = !technichIn;
           unauthorized = false;
           if(technichIn){
+              techCurrRoom = BREAKROOM;
               clockInTime = seconds;
               updateSafetyLimTime = true;
               sendMessage[MESIN] = true;
@@ -151,6 +156,7 @@ void rfidCheck(){
           }
           else{
               clockOutTime = seconds;
+              techAccRadAtClockOut = long(techAccRad);
               techOverstayWarning = false;
               sendMessage[MESOUT] = true;
               mesSent[MESOUT] = false;              
@@ -171,8 +177,8 @@ void rfidCheck(){
 
 void adcRead(){
   int adcRadiation = analogRead(RADPIN);
-  adcRadiation = (adcRadiation-350)/3;
-  radMean = radMean-(radMean/5.0)+adcRadiation/5.0;
+  adcRadiation = (adcRadiation-25)/9;
+  radMean = radMean-(radMean/10.0)+adcRadiation/10.0;
   int radMeanTrunk = radMean;
   if(radMeanTrunk > 100){
     radMeanTrunk = 100; 
@@ -191,6 +197,7 @@ void adcRead(){
       sendMessage[MESNEWSAFETIME] = true;
       mesSent[MESNEWSAFETIME] = false;   
   }
+  
   radLevel = radMeanTrunk;
   if(technichIn){
     if(analogRead(BREAKROOMPIN) < PUSHBUTTONTHREASHOLD && techCurrRoom != BREAKROOM){
@@ -237,51 +244,109 @@ void adcRead(){
   }
 }
 void sendBTMes(){
-  if (sendMessage[MESWAR] && !mesSent[MESWAR]){
-    bt.println("W ");
-    mesSent[MESWAR] = true;    
-  }
-  if (sendMessage[MESIN] && !mesSent[MESIN]){
-    String message = "I " + createTimeMess(clockInTime);
-    message += " ";
-    bt.println(message);       
-    mesSent[MESIN] = true;
-  }
-  if (sendMessage[MESOUT] && !mesSent[MESOUT]){
-    String message = "O " + createTimeMess(clockOutTime);
-    message += " ";
-    message += long(techAccRad);
-    message += " ";
-    bt.println(message);
-    mesSent[MESOUT] = true;
-    techAccRad = TECHSTARTRAD;
-  }  
-  if(sendMessage[MESGETTIME] && !mesSent[MESGETTIME]){
-    bt.println("T ");
-    mesSent[MESGETTIME] = true;
-  }
-  if(sendMessage[MESNEWROOM] && !mesSent[MESNEWROOM]){
-    String message = "R ";
-    message += techCurrRoom;
-    message += " ";
-    bt.println(message);
-    mesSent[MESNEWROOM] = true;
-  }
-  if(sendMessage[MESHAZMAT] && !mesSent[MESHAZMAT]){
-    String message = "P ";
-    message += gotHazmatSuit;
-    message += " ";
-    bt.println(message);
-    mesSent[MESHAZMAT] = true;
-  }
-  if(sendMessage[MESNEWSAFETIME] && !mesSent[MESNEWSAFETIME] ){
-    String message = "L ";
-    message += radLevel;
-    message += " ";
-    message += secToRadLim;
-    message += " ";
-    bt.println(message);
-    mesSent[MESNEWSAFETIME] = true;
+  bool sendMessageEnd = false;
+  if(sendNow){
+    if (sendMessage[MESWAR]){
+      if(!mesSent[MESWAR]){
+        bt.print("W;");
+        mesSent[MESWAR] = true;
+        sendMessageEnd = true;
+        mesSentAt = seconds;
+      }
+      else if( ((mesSentAt+1)%SECONDSINONEDAY) == seconds) {
+        mesSent[MESWAR] = false;
+      }
+    }
+    if (sendMessage[MESIN]){
+      if(!mesSent[MESIN]){ 
+        String message = "I " + createTimeMess(clockInTime);
+        message += ";";
+        bt.print(message);       
+        mesSent[MESIN] = true;
+        sendMessageEnd = true;
+        mesSentAt = seconds;
+      }
+      else if( ((mesSentAt+1)%SECONDSINONEDAY) == seconds) {
+        mesSent[MESIN] = false;
+      }
+    }
+    if (sendMessage[MESOUT]){
+      if(!mesSent[MESOUT]){
+        String message = "O " + createTimeMess(clockOutTime);
+        message += " ";
+        message += techAccRadAtClockOut;
+        message += ";";
+        bt.print(message);
+        mesSent[MESOUT] = true;
+        techAccRad = TECHSTARTRAD;
+        sendMessageEnd = true;
+        mesSentAt = seconds;
+      }
+      else if( ((mesSentAt+1)%SECONDSINONEDAY) == seconds) {
+        mesSent[MESOUT] = false;
+      }
+    }  
+    if(sendMessage[MESGETTIME]){
+      if(!mesSent[MESGETTIME]){
+        bt.print("T;");
+        mesSent[MESGETTIME] = true;
+        sendMessageEnd = true;
+        mesSentAt = seconds;
+      }
+      else if( ((mesSentAt+1)%SECONDSINONEDAY) == seconds) {
+        mesSent[MESGETTIME] = false;
+      }
+    }
+    if(sendMessage[MESNEWROOM]){
+      if(!mesSent[MESNEWROOM]){
+        String message = "R ";
+        message += techCurrRoom;
+        message += ";";
+        bt.print(message);
+        mesSent[MESNEWROOM] = true;
+        sendMessageEnd = true;
+        mesSentAt = seconds;
+      }
+      else if( ((mesSentAt+1)%SECONDSINONEDAY) == seconds) {
+        mesSent[MESNEWROOM] = false;
+      }
+    }
+    if(sendMessage[MESHAZMAT]){
+      if(!mesSent[MESHAZMAT]){
+        String message = "P ";
+        message += gotHazmatSuit;
+        message += ";";
+        bt.print(message);
+        mesSent[MESHAZMAT] = true;
+        sendMessageEnd = true;
+        mesSentAt = seconds;
+      }
+      else if( ((mesSentAt+1)%SECONDSINONEDAY) == seconds) {
+        mesSent[MESHAZMAT] = false;
+      }
+    }
+    if(sendMessage[MESNEWSAFETIME]){
+      if(!mesSent[MESNEWSAFETIME] ){
+        String message = "L ";
+        message += radLevel;
+        message += " ";
+        message += secToRadLim;
+        message += ";";
+        bt.print(message);
+        mesSent[MESNEWSAFETIME] = true;
+        sendMessageEnd = true;
+        mesSentAt = seconds;
+      }
+      else if( ((mesSentAt+1)%SECONDSINONEDAY) == seconds) {
+        mesSent[MESNEWSAFETIME] = false;
+      }
+    }
+    
+    if(sendMessageEnd){
+      bt.println();
+    }
+    
+    sendNow = false;
   }
 }
 
@@ -293,15 +358,33 @@ void readBTCom(){
   }
   char btCommand = btMessage[0];
   switch (btCommand){
-  case BTCOMTIMESYNC:
-    //digitalWrite(LEDPINTECHNICHIN, HIGH);
-    
-    long hours = btMessage.substring(2,4).toInt();
-    int minutes = btMessage.substring(5,7).toInt();
-    int seconds = btMessage.substring(8,10).toInt();   
-    sysSeconds = hours*3600+minutes*60+seconds;;
-    isSync = true;
-    break;
+    case 'W':
+      sendMessage[MESWAR] = false;
+      break;
+    case 'I':
+      sendMessage[MESIN] = false;
+      break;
+    case 'O':
+      sendMessage[MESOUT] = false;
+      break;
+    case 'R':
+      sendMessage[MESNEWROOM] = false;
+      break;
+    case 'P':
+      sendMessage[MESHAZMAT] = false;
+      break;
+    case 'L':
+      sendMessage[MESNEWSAFETIME] = false;
+      break; 
+    case BTCOMTIMESYNC:
+      //digitalWrite(LEDPINTECHNICHIN, HIGH);
+      long hours = btMessage.substring(2,4).toInt();
+      int minutes = btMessage.substring(5,7).toInt();
+      int seconds = btMessage.substring(8,10).toInt();   
+      sysSeconds = hours*3600+minutes*60+seconds;;
+      isSync = true;
+      sendMessage[MESGETTIME] = false;
+      break;    
   }  
   btMessage = "";    
 }
@@ -325,6 +408,7 @@ void updateClock(){
     updateTime = false;
     updateAccRad = true;
     updateLCD = true; 
+    sendNow = true;
   }
 }
 
@@ -395,7 +479,7 @@ void updateTechAccRad(){
       techAccRad += radPerSec;  
     }    
     secToRadLim = (RADSAFETYLIM - techAccRad)/radPerSec;
-    if(techAccRad >= RADSAFETYLIM){
+    if(techAccRad >= RADSAFETYLIM && !techOverstayWarning){
       sendMessage[MESWAR] = true;
       techOverstayWarning = true;
     }
@@ -441,15 +525,20 @@ void updateDisplay(){
                 else{
                     lcd.print("L=");
                     int HH = secToRadLim/3600;
-                    int MM = (secToRadLim%3600)/60;
-                    lcd.print((secToRadLim/3600)/10);//Hour Tens
-                    lcd.print((secToRadLim/3600)%10);//
-                    lcd.print(":");
-                    lcd.print((secToRadLim%3600)/600);//Min tens
-                    lcd.print(((secToRadLim%3600)/60)%10);//Min tens
-                    lcd.print(":");
-                    lcd.print((secToRadLim%60)/10);
-                    lcd.print(secToRadLim%10);
+                    if(HH > 99){
+                      lcd.print(HH);
+                      lcd.print("h   ");
+                    }
+                    else{
+                      lcd.print(HH/10);//Hour Tens
+                      lcd.print(HH%10);//
+                      lcd.print(":");
+                      lcd.print((secToRadLim%3600)/600);//Min tens
+                      lcd.print(((secToRadLim%3600)/60)%10);//Min tens
+                      lcd.print(":");
+                      lcd.print((secToRadLim%60)/10);
+                      lcd.print(secToRadLim%10);
+                    }
                 }
                 lcd.print(" ");
             }
