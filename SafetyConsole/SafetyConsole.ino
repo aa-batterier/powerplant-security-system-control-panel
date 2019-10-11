@@ -39,18 +39,20 @@
 //D10:pin of card reader SDA. D9:pin of card reader RST
 RFID rfid(10, 9);
 
+//Setting the Bluetooth communication pins
 SoftwareSerial bt(2,3);
 
+//Variables used for the rfid-reader
 unsigned char str[MAX_LEN]; //MAX_LEN is 16: size of the array
 unsigned char cardID[4] = {105,159,199,86};
 bool unauthorized = false;
 long unauthorizedTime = 0; //Is long to be able to store the time and use it to show a message for a limited time.
-bool technichIn;
+bool technichIn = false;
 
 //clock var
 int hour, minute, clockSecond; 
 long sysSeconds, seconds; //The reason to have multiple second variabels is to prevent race condition
-bool updateTime, isSync;
+bool updateTime, isSync = false;
 
 //radiation variables
 bool updateAccRad = false, updateSafetyLimTime = false;
@@ -80,17 +82,16 @@ bool mesSent[] = {false, false, false, false,false, false, false};
 LiquidCrystal lcd(8,7,6,5,4,1);
 bool updateLCD = true;
 
+/* 
+ *  setup() only runs when the safety console boots and it make sure that everything is setup and initialized before the 
+ *  program continues
+ */
 void setup() {
-  technichIn = false;
-  isSync = false;
 
   //Technichian in or out led config
   pinMode(LEDPINTECHNICHIN, OUTPUT);
   pinMode(LEDPINWARNING,OUTPUT);
-  
-  //Computer serial
-  //Serial.begin(9600);
-  
+    
   //RFID
   SPI.begin();
   rfid.init();
@@ -100,10 +101,12 @@ void setup() {
   
   //Init LCD
   lcd.begin(16,2);
- 
+
+  //Show message on display
   lcd.print("Please wait for");
   lcd.setCursor(3,1);
   lcd.print("time sync");
+  
   FlexiTimer2::set(1000, timerInt);
   FlexiTimer2::start();
   while(!isSync){ //Sync time with app before start
@@ -116,17 +119,25 @@ void setup() {
   }
 }
 
+/*
+ * loop() is executed directly after setup() and is then executed between 25-33 times per second depending mostly on the amount of
+ * BT-communication, until the safety console shuts down. 
+*/
 void loop() {
-  //recieve BT-message
-  updateClock();
+  updateClock(); 
   rfidCheck();
   adcRead();
   updateTechAccRad(); //updateTechAccRad() must be after adcRead() and before sendBTMes() 
-  readBTCom();
+  readBTCom(); //should be before sendBTMes() to make sure that messages recieved by the mobile application isn´t sent again.
   sendBTMes();
   updateDisplay();
 } 
 
+/*
+ * rfidCheck reads the serial number on the rfid-tag and checks if it is the authorized card.
+ * If it is it toggles the technichIn bool and depending on the result it sets a couple of 
+ * system variables (such as the time of the event) and which BT-messages that should be send. 
+ */
 void rfidCheck(){
   if (rfid.findCard(PICC_REQIDL, str) == MI_OK) {
     //Anti-collision detection, read card serial number
@@ -174,6 +185,11 @@ void rfidCheck(){
   }
   rfid.halt(); // command the card to enter sleeping state 
 }
+
+/*
+ * adcRead() reads the analogue inputs of the arduino and decides if any system variables need to be updated and 
+ * if any BT-commands need to be sent to the mobile application.
+ */
 
 void adcRead(){
   int adcRadiation = analogRead(RADPIN);
@@ -243,6 +259,13 @@ void adcRead(){
     }
   }
 }
+
+/*
+ * sendBTMes() sends commands to the mobile application. At the moment it only sends messages when seconds is updated. 
+ * The reason is to reduce the amount of messages sent. One message can contain all the different commands. 
+ * Every command will be resent every second until the mobile application has answered that it has received it.
+ */
+
 void sendBTMes(){
   bool sendMessageEnd = false;
   if(sendNow){
@@ -349,7 +372,10 @@ void sendBTMes(){
     sendNow = false;
   }
 }
-
+/*
+ * readBTCom() Receives commands from the mobile application. Most of the commands is only a confirmation that the 
+ * mobile application has received the message. One command contains data needed too sync both systems clocks.
+ */
 void readBTCom(){
   if(bt.available() > 0)
     delay(1); //The delay is here to make sure that the hole message is revieved before reading it.
@@ -377,7 +403,6 @@ void readBTCom(){
       sendMessage[MESNEWSAFETIME] = false;
       break; 
     case BTCOMTIMESYNC:
-      //digitalWrite(LEDPINTECHNICHIN, HIGH);
       long hours = btMessage.substring(2,4).toInt();
       int minutes = btMessage.substring(5,7).toInt();
       int seconds = btMessage.substring(8,10).toInt();   
@@ -398,7 +423,11 @@ void timerInt(){
     mesSent[MESGETTIME] = false;    
   }
 }
-
+/*
+ * Is used to reduce the amount of code in the interrupt function (reducing the risk of a race condition). 
+ * The code inside of updateClock is executed once every second and updates the variables holding the time 
+ * and makes sure that other parts of the code that should be executed once every second is executed.
+ */
 void updateClock(){
   if(updateTime){
     seconds = sysSeconds;
@@ -412,6 +441,10 @@ void updateClock(){
   }
 }
 
+/*
+ * createTimeMess(long) takes a argument containing a long with the number of seconds since last midnight. 
+ * It then transforms this into a time in the format HH:MM:SS
+ */
 String createTimeMess(long secSinceMidNig){
   String message = "";
   int hourSinceMidNight = (secSinceMidNig%86400)/3600; 
@@ -452,9 +485,17 @@ String createTimeMess(long secSinceMidNig){
   return message;
 }
 
+/*
+ * updateTechAccRad() updates the accumulated radiation that the technician has received since the clock in (techAccRad)
+ * and for how long it is safe for the technician to stay (secToRadLim). The code runs once every second or when 
+ * something changes (room/radiation level/protective clothes/clock out/clock in). 
+ * 
+ */
+
 void updateTechAccRad(){
   if((updateAccRad || updateSafetyLimTime) && technichIn){    
     float roomRadCof;
+    
     switch (techCurrRoom){
       case BREAKROOM:
         roomRadCof = RADBREAKROOM;
@@ -486,6 +527,17 @@ void updateTechAccRad(){
     updateAccRad = false;
   }
 }
+
+/*
+ * updateDisplay() updates the information on the LCD-display and warning LED. The display updates every second or when something  
+ * changes (room/radiation level/protective clothes/clock out/clock in). The information shown is dependent on if the technician 
+ * is clocked in or out. If clocked out the facilities radiation level is shown and the information that the technician is clocked out.
+ * If clocked in information about the facilities radiation level is shown and information about the technician such as protective clothes, 
+ * current room and a timer showing for how long the technician can stay before accumulated radiation level is to high. 
+ * If the technician overstays the timer is substituted with a warning message and the warning LED starts to blink. 
+ * When a technician clocks in or out a message is shown for a couple of seconds. If the rfid-reader has discovered a unauthorized card 
+ * a message is shown for a couple of seconds.
+ */
 
 void updateDisplay(){ 
     if (updateLCD){
